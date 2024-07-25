@@ -1,0 +1,34 @@
+name: Quality Item
+description: An item worth addressing during a quality day.
+title: "[Quality]: "
+labels: ["quality"]
+projects: ["MT-JEDI/projects/9"]
+body:
+  - type: textarea
+    id: info
+    attributes:
+      label: Desribe the idea
+      description: Provide any additional that may help someone accomplish this task
+      placeholder: ""
+      value: ""
+    validations:
+      required: true
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: How much impact will accomplishing this provide?
+      options:
+        - low
+        - medium
+        - high
+  - type: dropdown
+    id: difficulty 
+    attributes:
+      label: How difficult will this be to accomplish?
+      options:
+        - very easy
+        - easy
+        - medium
+        - hard
+        - very hard
