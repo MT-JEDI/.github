@@ -2,7 +2,7 @@ name: Quality Item
 description: An item worth addressing during a quality day.
 title: "[Quality]: "
 labels: ["quality"]
-projects: ["projects/9"]
+projects: ["MT-JEDI/9"]
 body:
   - type: textarea
     id: info
