@@ -9,8 +9,6 @@ body:
     attributes:
       label: Desribe the idea
       description: Provide any additional that may help someone accomplish this task
-      placeholder: ""
-      value: ""
     validations:
       required: true
   - type: dropdown
