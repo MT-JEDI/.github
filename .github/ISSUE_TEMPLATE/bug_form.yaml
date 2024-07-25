@@ -7,14 +7,6 @@ body:
     attributes:
       value: |
         Thanks for taking the time to fill out this bug report!
-  - type: input
-    id: title
-    attributes:
-      label: Bug Title
-      description: A short title for this bug
-      placeholder: "This thing is broken!"
-    validations:
-      required: true
   - type: textarea
     id: what-happened
     attributes:
