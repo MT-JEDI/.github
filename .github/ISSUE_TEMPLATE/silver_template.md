@@ -1,3 +1,11 @@
+---
+name: Silver Template
+about: If we want to add attributes to silver layer use this template
+title: "[SILVER] "
+labels: ''
+assignees: ''
+---
+
 # Silver Layer Template
 
 ## **Acceptance Criteria**  
