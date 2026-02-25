@@ -63,7 +63,7 @@ on:
 
 jobs:
   label-pr-size:
-    uses: MT-JEDI/.github/.github/WORKFLOW_TEMPLATES/pr-size-labeler.yml@main
+    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@main
 ```
 
 ### Customized usage with specific thresholds and settings:
@@ -77,7 +77,7 @@ on:
 
 jobs:
   label-pr-size:
-    uses: MT-JEDI/.github/.github/WORKFLOW_TEMPLATES/pr-size-labeler.yml@main
+    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@main
     with:
       xs_max_size: '10'
       s_max_size: '50'
