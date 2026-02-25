@@ -1,0 +1,94 @@
+name: PR size labeler
+
+on:
+  workflow_call:
+    inputs:
+      xs_label:
+        description: 'Label for extra small PRs'
+        default: 'size:xs'
+        required: false
+        type: string
+      xs_max_size:
+        description: 'Maximum size for extra small PRs'
+        default: '9'
+        required: false
+        type: string
+      s_label:
+        description: 'Label for small PRs'
+        default: 'size:s'
+        required: false
+        type: string
+      s_max_size:
+        description: 'Maximum size for small PRs'
+        default: '49'
+        required: false
+        type: string
+      m_label:
+        description: 'Label for medium PRs'
+        default: 'size:m'
+        required: false
+        type: string
+      m_max_size:
+        description: 'Maximum size for medium PRs'
+        default: '249'
+        required: false
+        type: string
+      l_label:
+        description: 'Label for large PRs'
+        default: 'size:l'
+        required: false
+        type: string
+      l_max_size:
+        description: 'Maximum size for large PRs'
+        default: '899'
+        required: false
+        type: string
+      xl_label:
+        description: 'Label for extra large PRs'
+        default: 'size:xl'
+        required: false
+        type: string
+      fail_if_xl:
+        description: 'Whether to fail the workflow if PR is extra large'
+        default: 'false'
+        required: false
+        type: string
+      message_if_xl:
+        description: 'Message to display if PR is extra large'
+        default: >
+          This PR exceeds the recommended size of 900 lines. Please make sure
+          you are NOT addressing multiple issues with one PR. Note this PR
+          might be rejected due to its size.
+        required: false
+        type: string
+      files_to_ignore:
+        description: 'Files to ignore when calculating PR size (comma-separated)'
+        default: 'package-lock.json,yarn.lock,pnpm-lock.yaml'
+        required: false
+        type: string
+
+jobs:
+  labeler:
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    name: Label the PR size
+    steps:
+      - name: Label PR by size
+        uses: codelytv/pr-size-labeler@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          xs_label: ${{ inputs.xs_label }}
+          xs_max_size: ${{ inputs.xs_max_size }}
+          s_label: ${{ inputs.s_label }}
+          s_max_size: ${{ inputs.s_max_size }}
+          m_label: ${{ inputs.m_label }}
+          m_max_size: ${{ inputs.m_max_size }}
+          l_label: ${{ inputs.l_label }}
+          l_max_size: ${{ inputs.l_max_size }}
+          xl_label: ${{ inputs.xl_label }}
+          fail_if_xl: ${{ inputs.fail_if_xl }}
+          message_if_xl: ${{ inputs.message_if_xl }}
+          files_to_ignore: ${{ inputs.files_to_ignore }}
