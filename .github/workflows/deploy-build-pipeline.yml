@@ -1,0 +1,114 @@
+name: Deploy Build Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      working_directory:
+        description: 'Working directory of the terraform module that defines the build pipeline'
+        required: false
+        default: './build-pipeline'
+        type: string
+
+env:
+  TERRAFORM_VERSION: '1.11.4'
+
+jobs:
+  terraform-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: write
+      checks: write
+      issues: write
+      discussions: write
+      actions: write
+      pull-requests: write
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.TOOLING_ACCOUNT_ID }}:role/infra-lz-code-pipeline-deployment-role-${{ vars.TOOLING_ACCOUNT_REGION }}
+          aws-region: ${{ vars.TOOLING_ACCOUNT_REGION }}
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          touch ~/.ssh/known_hosts && ssh-keyscan -t rsa,dsa -H github.com >> ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+          echo ${{ secrets.TERRAFORM_MODULES_KEY }} > temp_key.base64
+          base64 -d temp_key.base64 > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -e -f ~/.ssh/id_rsa -N ""
+
+      - name: Configure Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Run Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Run Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan
+        continue-on-error: false
+
+  terraform-apply:
+    runs-on: ubuntu-latest
+    environment: prod
+    needs: [terraform-plan]
+    permissions:
+      id-token: write
+      contents: write
+      checks: write
+      issues: write
+      discussions: write
+      actions: write
+      pull-requests: write
+
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_directory }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.TOOLING_ACCOUNT_ID }}:role/infra-lz-code-pipeline-deployment-role-${{ vars.TOOLING_ACCOUNT_REGION }}
+          aws-region: ${{ vars.TOOLING_ACCOUNT_REGION }}
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          touch ~/.ssh/known_hosts && ssh-keyscan -t rsa,dsa -H github.com >> ~/.ssh/known_hosts && chmod 600 ~/.ssh/known_hosts
+          echo ${{ secrets.TERRAFORM_MODULES_KEY }} > temp_key.base64
+          base64 -d temp_key.base64 > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keygen -y -e -f ~/.ssh/id_rsa -N ""
+
+      - name: Configure Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Run Terraform Init
+        id: init
+        run: terraform init
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve
+        continue-on-error: false
