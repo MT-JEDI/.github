@@ -38,6 +38,61 @@ jobs:
       additional-parameter: value
 ```
 
+## Shared Workflows
+
+### Deploy Build Pipeline
+
+Deploys Terraform infrastructure for CodePipeline build pipelines.
+
+**How it works:**
+1. `terraform-plan` job runs init, validate, and plan
+2. `terraform-apply` job waits for manual approval (via GitHub's `prod` environment protection)
+3. After approval, apply runs automatically
+
+**Prerequisites:**
+- Configure a `prod` environment in your repository (Settings → Environments)
+- Add **required reviewers** to the `prod` environment for the approval gate to work
+- Without required reviewers, the apply job runs immediately after plan completes
+
+**Terraform Version:** Centrally managed (currently `1.11.4`)
+
+#### Required Secrets
+- `TERRAFORM_MODULES_KEY`: Base64-encoded SSH key for private Terraform module access (This is already set as an org-level secret)
+
+#### Required Repository Variables
+- `TOOLING_ACCOUNT_ID`: AWS account ID for tooling
+- `TOOLING_ACCOUNT_REGION`: AWS region for tooling account
+
+#### Basic Usage
+
+```yml
+name: Deploy Build Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths: ['build-pipeline/*']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@main
+    secrets: inherit
+```
+
+#### Custom Working Directory
+
+```yml
+jobs:
+  deploy:
+    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@main
+    with:
+      working_directory: './infra/pipeline'
+    secrets: inherit
+```
+
+---
+
 ## PR Size Labeler Example
 
 The PR size labeler automatically labels pull requests based on their size.
