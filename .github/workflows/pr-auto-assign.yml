@@ -6,8 +6,6 @@ on:
 jobs:
   assign-author:
     permissions:
-      pull-requests: write
-      contents: read
       issues: write
     runs-on: ubuntu-latest
     name: Assign PR to creator

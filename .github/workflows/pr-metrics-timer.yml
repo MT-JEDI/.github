@@ -1,0 +1,81 @@
+name: PR approval time metrics
+
+on:
+  workflow_call:
+
+jobs:
+  calculate-time:
+    if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
+    permissions:
+      pull-requests: write
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    name: Post approval timing comment
+    steps:
+      - name: Calculate durations and comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const review = context.payload.review;
+            if (!pr || !review) {
+              core.setFailed('Caller must run on pull_request_review so pull_request and review payloads are available.');
+              return;
+            }
+
+            const formatDuration = (ms) => {
+              const hrs = Math.floor(ms / (1000 * 60 * 60));
+              const mins = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+              return `${hrs}h ${mins}m`;
+            };
+
+            const openedAt = new Date(pr.created_at);
+            const approvedAt = new Date(review.submitted_at);
+
+            // 1. Time from Open to Approval (covers the entire PR lifetime,
+            //    including any time spent in draft).
+            const openToApprovalMs = approvedAt - openedAt;
+
+            // 2. Time from "no longer in draft" to Approval.
+            //    Pulled from the PR timeline: the most recent `ready_for_review`
+            //    event at or before the approval is the transition we care about.
+            //    Handles draft -> ready -> draft -> ready cycles by taking the latest.
+            let readyForReviewAt = null;
+            const timelineEvents = await github.paginate(
+              github.rest.issues.listEventsForTimeline,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100,
+              }
+            );
+
+            for (const e of timelineEvents) {
+              if (e.event !== 'ready_for_review' || !e.created_at) continue;
+              const ts = new Date(e.created_at);
+              if (ts <= approvedAt && (!readyForReviewAt || ts > readyForReviewAt)) {
+                readyForReviewAt = ts;
+              }
+            }
+
+            const openToApprovalLine =
+              `**Time from Open to Approval:** ${formatDuration(openToApprovalMs)}`;
+
+            const readyToApprovalLine = readyForReviewAt
+              ? `**Time from Ready for Review to Approval:** ${formatDuration(approvedAt - readyForReviewAt)}`
+              : `**Time from Ready for Review to Approval:** N/A (PR was not opened as a draft)`;
+
+            const message = [
+              '### ⏱️ PR Metrics',
+              openToApprovalLine,
+              readyToApprovalLine,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: pr.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: message,
+            });

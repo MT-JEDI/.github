@@ -1,0 +1,9 @@
+name: PR auto assign author on pull request
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+jobs:
+  assign-author:
+    uses: ./.github/workflows/pr-auto-assign.yml
