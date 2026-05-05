@@ -141,3 +141,52 @@ jobs:
       fail_if_xl: 'true'
       files_to_ignore: 'package-lock.json,yarn.lock,pnpm-lock.yaml,*.min.js'
 ```
+
+---
+
+## PR auto assign author
+
+Assigns the PR author as an assignee and leaves a short comment when they were not already assigned. The shared workflow uses `on: workflow_call` and only needs `issues: write` (assignees and comments use the Issues API for pull requests).
+
+**This repository:** `pr-auto-assign-on-pull-request.yml` runs on pull requests to **this** `.github` repo and calls the reusable workflow. No extra setup is required here beyond merging that workflow.
+
+**Other repositories:** add a small workflow that triggers on `pull_request` and references the reusable file.
+
+### Basic usage
+
+```yml
+name: PR auto assign author
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+
+jobs:
+  assign-author:
+    uses: MT-JEDI/.github/.github/workflows/pr-auto-assign.yml@main
+```
+
+---
+
+## PR approval time metrics
+
+When a review is **submitted** and the state is **approved**, posts a PR comment with:
+
+- **Time from Open to Approval** (open time through approval, including any draft time)
+- **Time from Ready for Review to Approval** (from the latest `ready_for_review` timeline event before approval, or N/A if the PR was never a draft)
+
+Uses `on: workflow_call`; callers should run on `pull_request_review` with `types: [submitted]`.
+
+### Basic usage
+
+```yml
+name: Track PR approval time
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  calculate-time:
+    uses: MT-JEDI/.github/.github/workflows/pr-metrics-timer.yml@main
+```
