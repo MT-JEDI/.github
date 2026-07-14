@@ -101,8 +101,14 @@ jobs:
             src_dir=$(dirname "$test_dir")
             name=$(echo "$src_dir" | tr '/.' '--')
             echo "::group::Running tests in $src_dir"
+            rc=0
             (cd "$src_dir" && PYTHONPATH=".:${layer_paths}${PYTHONPATH:-}" python -m pytest tests/ \
-              --junitxml="$GITHUB_WORKSPACE/test-results/$name-results.xml" --tb=short -v) || failed=1
+              --junitxml="$GITHUB_WORKSPACE/test-results/$name-results.xml" --tb=short -v) || rc=$?
+            if [ "$rc" -eq 5 ]; then
+              echo "::warning::No tests collected in $src_dir (pytest exit 5); treating as skipped."
+            elif [ "$rc" -ne 0 ]; then
+              failed=1
+            fi
             echo "::endgroup::"
           done <<< "${{ steps.discover.outputs.dirs }}"
           exit $failed
