@@ -16,8 +16,8 @@
 
 ## Checklist
 
-- [] Code builds without errors
-- [] Code follows the project's code style guidelines
-- [] Tests were added for any new functionality
-- [] All tests pass
-- [] Documentation was added/updated if necessary
+- [ ] Code builds without errors
+- [ ] Code follows the project's code style guidelines
+- [ ] Tests were added for any new functionality
+- [ ] All tests pass
+- [ ] Documentation was added/updated if necessary

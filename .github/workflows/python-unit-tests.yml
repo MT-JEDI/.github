@@ -22,6 +22,10 @@ on:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -67,9 +71,11 @@ jobs:
           pip install pytest pytest-cov pytest-mock pytest-asyncio
           find "${{ inputs.test-root }}" -name requirements.txt \
             -not -path '*/node_modules/*' -not -path '*/automation-tests/*' \
+            -not -path '*/.venv/*' -not -path '*/test-env/*' -not -path '*/.git/*' \
             -exec pip install -r {} \;
           find "${{ inputs.test-root }}" -name requirements-dev.txt \
             -not -path '*/node_modules/*' -not -path '*/automation-tests/*' \
+            -not -path '*/.venv/*' -not -path '*/test-env/*' -not -path '*/.git/*' \
             -exec pip install -r {} \;
 
       - name: Run unit tests
@@ -86,9 +92,9 @@ jobs:
             exit $?
           fi
           layer_paths=""
-          for p in $(find . -type d -path '*/layers/*/python' -not -path '*/node_modules/*'); do
+          while IFS= read -r -d '' p; do
             layer_paths="${GITHUB_WORKSPACE}/${p#./}:${layer_paths}"
-          done
+          done < <(find . -type d -path '*/layers/*/python' -not -path '*/node_modules/*' -print0)
           failed=0
           while IFS= read -r test_dir; do
             [ -z "$test_dir" ] && continue
