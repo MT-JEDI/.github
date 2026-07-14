@@ -10,6 +10,10 @@
 
 [Add a link to the related issue here, if applicable]
 
+## Related ADO Item
+
+[Add the ADO work item ID or link here, if applicable]
+
 ## Checklist
 
 - [] Code builds without errors

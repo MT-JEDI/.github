@@ -141,3 +141,39 @@ jobs:
       fail_if_xl: 'true'
       files_to_ignore: 'package-lock.json,yarn.lock,pnpm-lock.yaml,*.min.js'
 ```
+
+## Team Conventions (DIoTS)
+
+### PR titles: conventional commits (enforced by CI)
+
+PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>(optional-scope): description`
+
+Allowed types: `feat` `fix` `chore` `docs` `test` `refactor` `ci` `perf` `build` `revert`
+
+Examples:
+- `feat: firmware download-url discovery API`
+- `fix(ble-scanner): apply shadow config before first scan`
+- `feat(ADO-238821): move user_provided location to config shadow`
+
+We squash-merge, so the PR title becomes the commit subject on `main`. The `Semantic PR Title` check enforces this on every PR in iot-* repos.
+
+### Branch naming (guidance, not enforced)
+
+`<type>/<ticket-or-slug>`, e.g. `feat/ADO-238821-config-shadow`, `fix/ble-scanner-boot-config`, `chore/sdlc-standardization`.
+
+### PR size
+
+The PR size labeler tags every PR (`size:xs` through `size:xl`, xl = >900 changed lines excluding lockfiles). Keep PRs under 900 lines; split stacked work into numbered PRs (see iot-firmware-management's `(1/4)`...`(4/4)` distro series for the pattern). **Planned for mid-August 2026:** `size:xl` PRs will fail the check and block merge.
+
+### ADO linkage
+
+Reference the ADO work item in the PR body (the template prompts for it). Optionally use the scope for it: `feat(ADO-12345): ...`. Not CI-enforced.
+
+### Python linting
+
+All iot-* repos lint with Ruff (rules `E`, `F`, `I`; `ruff format` for style). Config is `ruff.toml` at each repo root. Run locally with:
+
+```
+pip install ruff==0.15.6
+ruff check . && ruff format --check .
+```
