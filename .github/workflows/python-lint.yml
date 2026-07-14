@@ -1,0 +1,38 @@
+name: Python Lint
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to run Ruff under'
+        default: '3.13'
+        required: false
+        type: string
+      ruff-version:
+        description: 'Pinned Ruff version'
+        default: '0.15.6'
+        required: false
+        type: string
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install Ruff
+        run: pip install "ruff==${{ inputs.ruff-version }}"
+
+      - name: Ruff check
+        run: ruff check .
+
+      - name: Ruff format check
+        run: ruff format --check .
