@@ -1,0 +1,111 @@
+name: Snyk Monitor
+
+on:
+  workflow_call:
+    inputs:
+      project-tag:
+        description: 'Snyk project tag for this repository (e.g. iot-firmware)'
+        required: true
+        type: string
+      team-tag:
+        description: 'Snyk team tag'
+        default: 'JEDI'
+        required: false
+        type: string
+      lifecycle:
+        description: 'Snyk project lifecycle'
+        default: 'production'
+        required: false
+        type: string
+      severity-iac:
+        description: 'Severity threshold for the IaC report'
+        default: 'high'
+        required: false
+        type: string
+      python-version:
+        description: 'Python version for dependency install'
+        default: '3.13'
+        required: false
+        type: string
+    secrets:
+      SNYK_TOKEN:
+        required: true
+      SNYK_AWS_ROLE_ARN:
+        required: true
+
+jobs:
+  snyk-monitor:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.SNYK_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 aws-xray-sdk pydantic aws-lambda-powertools
+          find . -name "requirements.txt" \
+            -not -path '*/node_modules/*' -not -path '*/.venv/*' \
+            -not -path '*/test-env/*' -not -path '*/.git/*' \
+            -exec pip install -r {} \;
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk Monitor
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk monitor \
+            --tags=scmhost=github,scmorg=${{ github.repository_owner }},scmrepo=${{ github.event.repository.name }},team=${{ inputs.team-tag }},project=${{ inputs.project-tag }} \
+            --target-reference=${{ github.ref_name }} \
+            --all-projects \
+            --project-lifecycle=${{ inputs.lifecycle }}
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Snyk Monitor found no supported manifests in this repository; passing."
+            exit 0
+          fi
+          exit $rc
+
+  snyk-iac-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk IaC Test and Report
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk iac test --severity-threshold=${{ inputs.severity-iac }} --report \
+            --tags=scmhost=github,scmorg=${{ github.repository_owner }},scmrepo=${{ github.event.repository.name }},team=${{ inputs.team-tag }},project=${{ inputs.project-tag }} \
+            --target-reference=${{ github.ref_name }} \
+            --project-lifecycle=${{ inputs.lifecycle }}
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Snyk IaC found no supported files in this repository; passing."
+            exit 0
+          fi
+          exit $rc
