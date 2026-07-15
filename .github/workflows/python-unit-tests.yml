@@ -1,4 +1,10 @@
 name: Python Unit Tests
+# Coverage ratchet: combines per-suite coverage into a repo-wide total and
+# compares it against coverage-baseline.txt at the repo root (absent file =
+# advisory notice only). If a repo uses the test-script input, the script may
+# opt into the ratchet by leaving coverage data files at coverage-data/.coverage.*
+# Note: suites with no collectable tests still count their source at 0% in the
+# repo-wide total (deliberate: untested code drags the ratchet).
 
 on:
   workflow_call:
@@ -68,7 +74,7 @@ jobs:
         if: steps.discover.outputs.found == 'true'
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov pytest-mock pytest-asyncio
+          pip install pytest pytest-cov pytest-mock pytest-asyncio coverage
           find "${{ inputs.test-root }}" -name requirements.txt \
             -not -path '*/node_modules/*' -not -path '*/automation-tests/*' \
             -not -path '*/.venv/*' -not -path '*/test-env/*' -not -path '*/.git/*' \
@@ -86,7 +92,7 @@ jobs:
           AWS_ACCESS_KEY_ID: fake
           AWS_SECRET_ACCESS_KEY: fake
         run: |
-          mkdir -p test-results
+          mkdir -p test-results coverage-data
           if [ -n "${{ inputs.test-script }}" ]; then
             bash "${{ inputs.test-script }}"
             exit $?
@@ -102,7 +108,9 @@ jobs:
             name=$(echo "$src_dir" | tr '/.' '--')
             echo "::group::Running tests in $src_dir"
             rc=0
-            (cd "$src_dir" && PYTHONPATH=".:${layer_paths}${PYTHONPATH:-}" python -m pytest tests/ \
+            (cd "$src_dir" && PYTHONPATH=".:${layer_paths}${PYTHONPATH:-}" \
+              COVERAGE_FILE="$GITHUB_WORKSPACE/coverage-data/.coverage.$name" \
+              python -m coverage run --source=. -m pytest tests/ \
               --junitxml="$GITHUB_WORKSPACE/test-results/$name-results.xml" --tb=short -v) || rc=$?
             if [ "$rc" -eq 5 ]; then
               echo "::warning::No tests collected in $src_dir (pytest exit 5); treating as skipped."
@@ -112,6 +120,43 @@ jobs:
             echo "::endgroup::"
           done <<< "${{ steps.discover.outputs.dirs }}"
           exit $failed
+
+      - name: Coverage ratchet
+        if: steps.discover.outputs.found == 'true'
+        run: |
+          if ! ls coverage-data/.coverage.* >/dev/null 2>&1; then
+            echo "::notice::No coverage data produced; coverage ratchet skipped."
+            exit 0
+          fi
+          if ! coverage combine coverage-data/ 2>/dev/null; then
+            echo "::notice::No combinable coverage data; coverage ratchet skipped."
+            exit 0
+          fi
+          if ! coverage json -o coverage-total.json \
+            --omit='*/tests/*,*/test-env/*,*/.venv/*,*/node_modules/*' 2>/dev/null; then
+            echo "::notice::No measurable coverage; coverage ratchet skipped."
+            exit 0
+          fi
+          total=$(python -c "import json; print(round(json.load(open('coverage-total.json'))['totals']['percent_covered'], 1))")
+          echo "Repo-wide unit-test coverage: ${total}%"
+          if [ ! -f coverage-baseline.txt ]; then
+            echo "::notice::No coverage baseline; repo-wide coverage is ${total}%. Commit coverage-baseline.txt (a single number) at the repo root to enable the ratchet."
+            exit 0
+          fi
+          baseline=$(head -n1 coverage-baseline.txt | tr -d '[:space:]')
+          if ! [[ "$baseline" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            echo "::error::coverage-baseline.txt must contain a single number (found: '${baseline}'). Fix or remove the file."
+            exit 1
+          fi
+          python -c "
+          import sys
+          total, baseline = float('${total}'), float('${baseline}')
+          if total < baseline:
+              print(f'::error::Coverage {total}% is below the baseline {baseline}% (coverage-baseline.txt). Add tests, or lower the baseline in this PR with justification.')
+              sys.exit(1)
+          if total >= baseline + 1.0:
+              print(f'::notice::Coverage rose to {total}% (baseline {baseline}%). Bump coverage-baseline.txt.')
+          "
 
       - name: Publish test results
         if: always() && steps.discover.outputs.found == 'true'
