@@ -62,6 +62,14 @@ jobs:
             -not -path '*/node_modules/*' -not -path '*/.venv/*' \
             -not -path '*/test-env/*' -not -path '*/.git/*' \
             -exec pip install -r {} \;
+          find . -name package.json \
+            -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.terraform/*' \
+            | while IFS= read -r pkg; do
+              dir=$(dirname "$pkg")
+              echo "Installing Node dependencies in $dir"
+              (cd "$dir" && if [ -f package-lock.json ]; then npm ci; else npm install; fi) \
+                || echo "::warning::npm install failed in $dir; snyk will surface it"
+            done
 
       - name: Install Snyk CLI
         run: npm install -g snyk
