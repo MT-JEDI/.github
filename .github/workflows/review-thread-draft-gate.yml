@@ -1,0 +1,86 @@
+name: Review Thread Draft Gate
+
+# Converts a PR back to draft whenever it has unresolved review threads
+# authored by the configured bot login. Never auto-readies a PR; a human
+# always marks ready-for-review. Callers trigger on ready_for_review,
+# review submission, and thread resolve/unresolve events.
+# Optional secret DRAFT_GATE_TOKEN: used instead of GITHUB_TOKEN if the
+# default token cannot run convertPullRequestToDraft.
+
+on:
+  workflow_call:
+    inputs:
+      bot-login:
+        description: 'Login whose unresolved review threads force the PR to draft'
+        default: 'copilot-pull-request-reviewer'
+        required: false
+        type: string
+    secrets:
+      DRAFT_GATE_TOKEN:
+        description: 'Optional token with pull-requests:write for the draft conversion'
+        required: false
+
+jobs:
+  draft-gate:
+    if: github.event.pull_request.draft == false
+    concurrency:
+      group: review-thread-draft-gate-${{ github.repository }}-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Demote PR to draft when unresolved bot threads exist
+        env:
+          GH_TOKEN: ${{ secrets.DRAFT_GATE_TOKEN || secrets.GITHUB_TOKEN }}
+          BOT_LOGIN: ${{ inputs.bot-login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          owner=${GITHUB_REPOSITORY%/*}
+          name=${GITHUB_REPOSITORY#*/}
+          data=$(gh api graphql -f query='
+            query($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) {
+                  id
+                  isDraft
+                  reviewThreads(first: 100) {
+                    nodes {
+                      isResolved
+                      comments(first: 1) { nodes { author { login } url } }
+                    }
+                  }
+                }
+              }
+            }' -f owner="$owner" -f name="$name" -F number="$PR_NUMBER")
+          is_draft=$(jq -r '.data.repository.pullRequest.isDraft' <<<"$data")
+          pr_id=$(jq -r '.data.repository.pullRequest.id' <<<"$data")
+          mapfile -t urls < <(jq -r --arg bot "$BOT_LOGIN" '
+            .data.repository.pullRequest.reviewThreads.nodes[]
+            | select(.isResolved == false)
+            | select(.comments.nodes[0].author.login == $bot)
+            | .comments.nodes[0].url' <<<"$data")
+          count=${#urls[@]}
+          if [ "$is_draft" = "true" ] || [ "$count" -eq 0 ]; then
+            echo "Nothing to do (draft=$is_draft, unresolved ${BOT_LOGIN} threads=$count)."
+            exit 0
+          fi
+          echo "Demoting PR #$PR_NUMBER to draft: $count unresolved ${BOT_LOGIN} thread(s)."
+          gh api graphql -f query='
+            mutation($id: ID!) {
+              convertPullRequestToDraft(input: {pullRequestId: $id}) {
+                pullRequest { isDraft }
+              }
+            }' -f id="$pr_id"
+          body="<!-- review-thread-draft-gate -->
+          Converted back to **draft**: $count unresolved \`$BOT_LOGIN\` review thread(s). Resolve them (reply + resolve) before marking ready for review.
+          $(printf -- '- %s\n' "${urls[@]}")"
+          existing=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- review-thread-draft-gate -->"))][0].id // empty')
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="$body"
+          else
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$body"
+          fi
