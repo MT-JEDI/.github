@@ -99,7 +99,7 @@ jobs:
             | while IFS= read -r pkg; do
               dir=$(dirname "$pkg")
               echo "Installing Node dependencies in $dir"
-              (cd "$dir" && if [ -f package-lock.json ]; then npm ci; else npm install; fi) \
+              (cd "$dir" && if [ -f package-lock.json ]; then npm ci --ignore-scripts; else npm install --ignore-scripts; fi) \
                 || echo "::warning::npm install failed in $dir; snyk will surface it"
             done
 
