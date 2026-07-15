@@ -1,0 +1,134 @@
+name: Snyk PR Scan
+
+on:
+  workflow_call:
+    inputs:
+      severity-code:
+        description: 'Severity threshold for Snyk Code (SAST)'
+        default: 'high'
+        required: false
+        type: string
+      severity-sca:
+        description: 'Severity threshold for Snyk Open Source (SCA)'
+        default: 'critical'
+        required: false
+        type: string
+      severity-iac:
+        description: 'Severity threshold for Snyk IaC'
+        default: 'high'
+        required: false
+        type: string
+      python-version:
+        description: 'Python version for dependency install'
+        default: '3.13'
+        required: false
+        type: string
+    secrets:
+      SNYK_TOKEN:
+        required: true
+
+jobs:
+  snyk-code-test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SNYK_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk Code Test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk code test --severity-threshold=${{ inputs.severity-code }} --all-projects
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Snyk Code found no supported files in this repository; passing."
+            exit 0
+          fi
+          exit $rc
+
+  snyk-sca-test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.SNYK_AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3 aws-xray-sdk pydantic aws-lambda-powertools
+          find . -name "requirements.txt" \
+            -not -path '*/node_modules/*' -not -path '*/.venv/*' \
+            -not -path '*/test-env/*' -not -path '*/.git/*' \
+            -exec pip install -r {} \;
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk SCA Test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk test --severity-threshold=${{ inputs.severity-sca }} --all-projects
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Snyk SCA found no supported manifests in this repository; passing."
+            exit 0
+          fi
+          exit $rc
+
+  snyk-iac-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Snyk IaC Test
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          set +e
+          snyk iac test --severity-threshold=${{ inputs.severity-iac }}
+          rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::Snyk IaC found no supported files in this repository; passing."
+            exit 0
+          fi
+          exit $rc
