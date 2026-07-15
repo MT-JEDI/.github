@@ -7,8 +7,8 @@ name: Review Thread Draft Gate
 # (pull_request: ready_for_review, reopened, synchronize). Note that
 # pull_request_review_thread is NOT a valid Actions trigger; after resolving
 # threads, the author marks the PR ready again, which re-runs the gate.
-# Optional secret DRAFT_GATE_TOKEN: used instead of GITHUB_TOKEN if the
-# default token cannot run convertPullRequestToDraft.
+# Optional secrets for draft conversion (tried in order): DRAFT_GATE_TOKEN,
+# SVC_JEDI_CI_PAT, GITHUB_TOKEN (which cannot perform convertPullRequestToDraft).
 
 on:
   workflow_call:
@@ -21,6 +21,9 @@ on:
     secrets:
       DRAFT_GATE_TOKEN:
         description: 'Optional token with pull-requests:write for the draft conversion'
+        required: false
+      SVC_JEDI_CI_PAT:
+        description: 'Existing org CI PAT; used for the draft conversion when DRAFT_GATE_TOKEN is unset'
         required: false
 
 jobs:
@@ -36,7 +39,7 @@ jobs:
     steps:
       - name: Demote PR to draft when unresolved bot threads exist
         env:
-          GH_TOKEN: ${{ secrets.DRAFT_GATE_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.DRAFT_GATE_TOKEN || secrets.SVC_JEDI_CI_PAT || secrets.GITHUB_TOKEN }}
           BOT_LOGIN: ${{ inputs.bot-login }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
