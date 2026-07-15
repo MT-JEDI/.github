@@ -2,8 +2,11 @@ name: Review Thread Draft Gate
 
 # Converts a PR back to draft whenever it has unresolved review threads
 # authored by the configured bot login. Never auto-readies a PR; a human
-# always marks ready-for-review. Callers trigger on ready_for_review,
-# review submission, and thread resolve/unresolve events.
+# always marks ready-for-review.
+# review submission (pull_request_review: submitted) and PR lifecycle events
+# (pull_request: ready_for_review, reopened, synchronize). Note that
+# pull_request_review_thread is NOT a valid Actions trigger; after resolving
+# threads, the author marks the PR ready again, which re-runs the gate.
 # Optional secret DRAFT_GATE_TOKEN: used instead of GITHUB_TOKEN if the
 # default token cannot run convertPullRequestToDraft.
 
