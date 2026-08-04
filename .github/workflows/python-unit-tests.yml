@@ -44,10 +44,19 @@ jobs:
       - name: Discover test directories
         id: discover
         run: |
+          # .terraform is excluded for parity with the repo-local mirror scripts
+          # (scripts/run-unit-tests.sh), not for this job's benefit: a CI checkout has no
+          # .terraform, since it is gitignored and nothing here runs terraform init, so
+          # the exclusion is a no-op upstream. It matters locally, where a terraform-inited
+          # repo would otherwise run the vendored suites under .terraform/modules/* and
+          # count their uncovered source in the coverage total. Keeping both discovery
+          # lists textually identical is what stops the exclusion being dropped by
+          # syncing one file to the other.
           candidates=$(find "${{ inputs.test-root }}" -type d -name tests \
             -not -path '*/node_modules/*' -not -path '*/.venv/*' \
             -not -path '*/test-env/*' -not -path '*/.git/*' \
-            -not -path '*/automation-tests/*')
+            -not -path '*/automation-tests/*' \
+            -not -path '*/.terraform/*')
           dirs=""
           while IFS= read -r d; do
             [ -z "$d" ] && continue
