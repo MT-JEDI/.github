@@ -48,7 +48,7 @@ uses: MT-JEDI/.github/.github/workflows/<workflow>.yml@v1
 
 | Change type | Example commit | Bump |
 |-------------|----------------|------|
-| Breaking (required input removed/renamed, behavior change) | `feat!: drop deprecated bot-login default` | major (`v2.0.0`, alias `v2`) |
+| Breaking (required input removed/renamed, behavior change) | `feat!: ...` or `feat(scope)!: ...` | major (`v2.0.0`, alias `v2`) |
 | New workflow or optional input | `feat: add timeout input to draft gate` | minor (`v1.1.0`) |
 | Fix or non-breaking tweak | `fix: paginate review thread query` | patch (`v1.0.1`) |
 

@@ -42,7 +42,7 @@ jobs:
             exit 0
           fi
           subject="${COMMIT_MSG%%$'\n'*}"
-          if echo "$subject" | grep -qiE 'BREAKING CHANGE|^[^(:]+!(\(|:)|^[^(:]+!: '; then
+          if echo "$subject" | grep -qiE 'BREAKING CHANGE|^[a-z]+(\([^)]*\))?!(\(|:)'; then
             echo "bump=major" >> "$GITHUB_OUTPUT"
           elif echo "$subject" | grep -qE '^(feat)(\([^)]+\))?!?: '; then
             echo "bump=minor" >> "$GITHUB_OUTPUT"
