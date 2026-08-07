@@ -62,45 +62,6 @@ PR titles must follow conventional commits (same types as `semantic-pr-title.yml
 
 **Squash-merge is required.** [release.yml](.github/workflows/release.yml) reads the merge commit subject on `main`. A regular merge commit (`Merge pull request #N ...`) or a rebase merge does not match conventional commits and skips the release. This repo must allow **squash merge only**, with the squash commit title set to the **PR title** (not the underlying commit message).
 
-### Enforce squash-merge (one-time, repo admin)
-
-Run once with a token that has **Admin** on this repository:
-
-```bash
-gh api -X PATCH repos/MT-JEDI/.github \
-  -F allow_squash_merge=true \
-  -F allow_merge_commit=false \
-  -F allow_rebase_merge=false \
-  -F squash_merge_commit_title=PR_TITLE \
-  -F squash_merge_commit_message=COMMIT_MESSAGES \
-  -F delete_branch_on_merge=true
-```
-
-Verify:
-
-```bash
-gh api repos/MT-JEDI/.github \
-  --jq '{allow_merge_commit, allow_squash_merge, allow_rebase_merge, squash_merge_commit_title, delete_branch_on_merge}'
-```
-
-Expected: `allow_merge_commit` and `allow_rebase_merge` are `false`; `allow_squash_merge` is `true`; `squash_merge_commit_title` is `PR_TITLE`.
-
-### Initial bootstrap (one-time, maintainer)
-
-Before the first automated release, seed the starting version:
-
-```bash
-git checkout main
-git pull
-git tag -a v1.0.0 -m "Initial release of shared workflows"
-git tag -f v1 v1.0.0
-git push origin v1.0.0 v1
-```
-
-Confirm the repo ruleset allows the release workflow to create and force-push tags (`contents: write` on `GITHUB_TOKEN`).
-
----
-
 ## Shared Workflows
 
 ### Deploy Build Pipeline
