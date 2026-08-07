@@ -38,6 +38,44 @@ jobs:
       additional-parameter: value
 ```
 
+## Versioning
+
+Shared workflows are versioned with [SemVer](https://semver.org/) tags. Consumer repos should pin to the **major alias** (currently `@v1`), not `@main`:
+
+```yml
+uses: MT-JEDI/.github/.github/workflows/<workflow>.yml@v1
+```
+
+| Change type | Example commit | Bump |
+|-------------|----------------|------|
+| Breaking (required input removed/renamed, behavior change) | `feat!: drop deprecated bot-login default` | major (`v2.0.0`, alias `v2`) |
+| New workflow or optional input | `feat: add timeout input to draft gate` | minor (`v1.1.0`) |
+| Fix or non-breaking tweak | `fix: paginate review thread query` | patch (`v1.0.1`) |
+
+On every conventional-commit squash merge to `main`, [release.yml](.github/workflows/release.yml):
+
+1. Creates an annotated tag `vX.Y.Z`
+2. Force-moves the major alias `vX` to the same commit (so `@v1` always resolves to the latest v1.x release)
+3. Publishes a GitHub Release with generated notes
+
+PR titles must follow conventional commits (same types as `semantic-pr-title.yml`); merges with non-conventional subjects do not produce a release.
+
+### Initial bootstrap (one-time, maintainer)
+
+Before the first automated release, seed the starting version:
+
+```bash
+git checkout main
+git pull
+git tag -a v1.0.0 -m "Initial release of shared workflows"
+git tag -f v1 v1.0.0
+git push origin v1.0.0 v1
+```
+
+Confirm the repo ruleset allows the release workflow to create and force-push tags (`contents: write` on `GITHUB_TOKEN`).
+
+---
+
 ## Shared Workflows
 
 ### Deploy Build Pipeline
@@ -76,7 +114,7 @@ on:
 
 jobs:
   deploy:
-    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@main
+    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@v1
     secrets: inherit
 ```
 
@@ -85,7 +123,7 @@ jobs:
 ```yml
 jobs:
   deploy:
-    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@main
+    uses: MT-JEDI/.github/.github/workflows/deploy-build-pipeline.yml@v1
     with:
       working_directory: './infra/pipeline'
     secrets: inherit
@@ -118,7 +156,7 @@ on:
 
 jobs:
   label-pr-size:
-    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@main
+    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@v1
 ```
 
 ### Customized usage with specific thresholds and settings:
@@ -132,7 +170,7 @@ on:
 
 jobs:
   label-pr-size:
-    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@main
+    uses: MT-JEDI/.github/.github/workflows/pr-size-labeler.yml@v1
     with:
       xs_max_size: '10'
       s_max_size: '50'
