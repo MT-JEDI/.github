@@ -60,21 +60,7 @@ On every conventional-commit squash merge to `main`, [release.yml](.github/workf
 
 PR titles must follow conventional commits (same types as `semantic-pr-title.yml`); merges with non-conventional subjects do not produce a release.
 
-### Initial bootstrap (one-time, maintainer)
-
-Before the first automated release, seed the starting version:
-
-```bash
-git checkout main
-git pull
-git tag -a v1.0.0 -m "Initial release of shared workflows"
-git tag -f v1 v1.0.0
-git push origin v1.0.0 v1
-```
-
-Confirm the repo ruleset allows the release workflow to create and force-push tags (`contents: write` on `GITHUB_TOKEN`).
-
----
+**Squash-merge is required.** [release.yml](.github/workflows/release.yml) reads the merge commit subject on `main`. A regular merge commit (`Merge pull request #N ...`) or a rebase merge does not match conventional commits and skips the release. This repo must allow **squash merge only**, with the squash commit title set to the **PR title** (not the underlying commit message).
 
 ## Shared Workflows
 
