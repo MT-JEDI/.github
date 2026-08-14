@@ -70,7 +70,8 @@ jobs:
           major="${v%%.*}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "$major" "$v"
+          # Tag action pushes via the API; the new tag is not in the local ref store yet.
+          git tag -f "$major" "${{ github.sha }}"
           git push -f origin "refs/tags/$major"
 
       - name: Create GitHub Release
