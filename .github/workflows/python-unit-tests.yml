@@ -24,14 +24,48 @@ on:
         default: ''
         required: false
         type: string
+      aws-role:
+        description: >-
+          Optional IAM role to assume before installing dependencies, for repos whose
+          requirements come from a private CodeArtifact index. Leave empty to skip the
+          AWS login entirely (the default, and what every public-dependency repo wants).
+          Requires the CALLER to grant `id-token: write`; see the permissions note below.
+        default: ''
+        required: false
+        type: string
+      aws-region:
+        description: 'Region for the assumed role and the CodeArtifact login'
+        default: 'us-east-1'
+        required: false
+        type: string
+      codeartifact-domain:
+        description: 'CodeArtifact domain to log pip into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-domain-owner:
+        description: 'Account id owning the CodeArtifact domain (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-repository:
+        description: 'CodeArtifact repository to log pip into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
 
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
+    # No `permissions:` block on purpose, so the job inherits whatever the CALLER
+    # granted. A reusable workflow can only narrow the caller's grant, never widen
+    # it, so declaring `id-token: write` here would fail every caller that does not
+    # also grant it -- and only the CodeArtifact path needs that scope. Callers must
+    # grant, at minimum:
+    #     contents: read        (checkout)
+    #     checks: write         )  publish-unit-test-result-action creates a check run
+    #     pull-requests: write  )  and, with comment_mode: always, a PR comment
+    # plus `id-token: write` if and only if they pass the aws-role input.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -84,6 +118,38 @@ jobs:
       - name: No tests found (vacuous pass)
         if: steps.discover.outputs.found == 'false'
         run: echo "::notice::No unit tests found in this repository. The unit-test gate passes vacuously. Add tests under a tests/ directory to activate it."
+
+      # Only for repos whose requirements resolve against a private CodeArtifact
+      # index. The credentials this obtains are used for the install below and
+      # nothing else: the test step overrides them with fake values, so a test can
+      # never ride these into a live AWS call.
+      - name: Configure AWS credentials for CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Log pip into CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        env:
+          DOMAIN: ${{ inputs.codeartifact-domain }}
+          DOMAIN_OWNER: ${{ inputs.codeartifact-domain-owner }}
+          REPOSITORY: ${{ inputs.codeartifact-repository }}
+        run: |
+          # All four inputs or none: a partial set would otherwise fail deep inside
+          # pip with a confusing 403 rather than here with a readable message.
+          for name in DOMAIN DOMAIN_OWNER REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              input_name=$(echo "$name" | tr 'A-Z_' 'a-z-')
+              echo "::error::aws-role was supplied without codeartifact-${input_name}; pass all four inputs or none."
+              exit 1
+            fi
+          done
+          aws codeartifact login --tool pip \
+            --domain "$DOMAIN" \
+            --domain-owner "$DOMAIN_OWNER" \
+            --repository "$REPOSITORY"
 
       - name: Install dependencies
         if: steps.discover.outputs.found == 'true'
