@@ -120,9 +120,11 @@ jobs:
         run: echo "::notice::No unit tests found in this repository. The unit-test gate passes vacuously. Add tests under a tests/ directory to activate it."
 
       # Only for repos whose requirements resolve against a private CodeArtifact
-      # index. The credentials this obtains are used for the install below and
-      # nothing else: the test step overrides them with fake values, so a test can
-      # never ride these into a live AWS call.
+      # index. The credentials this obtains are cleared again immediately after the
+      # install step, by the "Revoke AWS credentials" step below, so that no later
+      # step in the job runs with a live role. Relying on the test step's fake AWS_*
+      # values for that is not enough: it overrides the key and secret but not
+      # AWS_SESSION_TOKEN, and the coverage and publish steps override nothing at all.
       - name: Configure AWS credentials for CodeArtifact
         if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
         uses: aws-actions/configure-aws-credentials@v4
@@ -164,6 +166,23 @@ jobs:
             -not -path '*/node_modules/*' -not -path '*/automation-tests/*' \
             -not -path '*/.venv/*' -not -path '*/test-env/*' -not -path '*/.git/*' \
             -exec pip install -r {} \;
+
+      # configure-aws-credentials exports the assumed role into the job environment,
+      # where it would otherwise stay live for every remaining step. Blanking the
+      # variables is the available mechanism: GITHUB_ENV can set but not unset, and an
+      # empty credential fails closed, which is the intent.
+      #
+      # The CodeArtifact token that `aws codeartifact login` wrote into pip's config is
+      # deliberately left in place: a repo using test-script may install more
+      # dependencies during the test step and would break without it. That token is a
+      # short-lived read grant on one CodeArtifact repository, not the role itself.
+      - name: Revoke AWS credentials
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        run: |
+          for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION; do
+            echo "${var}=" >> "$GITHUB_ENV"
+          done
+          echo "Assumed-role credentials cleared for subsequent steps."
 
       - name: Run unit tests
         if: steps.discover.outputs.found == 'true'
