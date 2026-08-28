@@ -27,6 +27,35 @@ on:
         default: '3.13'
         required: false
         type: string
+      aws-role:
+        description: >-
+          Optional IAM role to assume for a CodeArtifact login before installing
+          dependencies, for repos whose requirements come from a private index. Leave
+          empty to skip it entirely (the default). Same contract as the input of the
+          same name on python-unit-tests.yml.
+        default: ''
+        required: false
+        type: string
+      codeartifact-region:
+        description: 'Region for the CodeArtifact login (defaults to the domain region)'
+        default: 'us-east-1'
+        required: false
+        type: string
+      codeartifact-domain:
+        description: 'CodeArtifact domain to log pip into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-domain-owner:
+        description: 'Account id owning the CodeArtifact domain (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-repository:
+        description: 'CodeArtifact repository to log pip into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
     secrets:
       SNYK_TOKEN:
         required: true
@@ -40,12 +69,6 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.SNYK_AWS_ROLE_ARN }}
-          aws-region: us-east-1
-
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -53,6 +76,50 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
+
+      # Only for repos whose requirements resolve against a private CodeArtifact index.
+      # Without it, `pip install -r` cannot fetch those wheels, and `snyk monitor` then
+      # fails to build a dependency tree, so the repo silently stops being monitored.
+      #
+      # This runs BEFORE the Snyk role is assumed, on purpose. `aws codeartifact login`
+      # writes an index URL with an embedded token into pip's config file, and that file
+      # outlives the credential swap that follows, so pip can still resolve during the
+      # install step. Assuming the Snyk role afterwards also means these credentials do
+      # not linger in the job environment, so no separate revoke step is needed.
+      - name: Configure AWS credentials for CodeArtifact
+        if: inputs.aws-role != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role }}
+          aws-region: ${{ inputs.codeartifact-region }}
+
+      - name: Log pip into CodeArtifact
+        if: inputs.aws-role != ''
+        env:
+          DOMAIN: ${{ inputs.codeartifact-domain }}
+          DOMAIN_OWNER: ${{ inputs.codeartifact-domain-owner }}
+          REPOSITORY: ${{ inputs.codeartifact-repository }}
+        run: |
+          for name in DOMAIN DOMAIN_OWNER REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              input_name=$(echo "$name" | tr 'A-Z_' 'a-z-')
+              echo "::error::aws-role was supplied without codeartifact-${input_name}; pass all four inputs or none."
+              exit 1
+            fi
+          done
+          aws codeartifact login --tool pip \
+            --domain "$DOMAIN" \
+            --domain-owner "$DOMAIN_OWNER" \
+            --repository "$REPOSITORY"
+
+      # Moved below checkout/setup-python so the optional CodeArtifact login above can
+      # run first. Nothing before this point uses AWS, so the move is inert, and this
+      # remains the credential in effect for the install and monitor steps.
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.SNYK_AWS_ROLE_ARN }}
+          aws-region: us-east-1
 
       - name: Install dependencies
         run: |
