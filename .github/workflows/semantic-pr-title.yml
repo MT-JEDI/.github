@@ -55,6 +55,6 @@ jobs:
           scopes: |
             ADO-\d+
             NO-TICKET
-          # No comma in the scope, so a title carries one ticket only
-          headerPattern: '^(\w*)(?:\(([\w-]*)\))?: (.*)$'
+          # No comma in the scope, so a title carries one ticket only; optional ! marks a breaking change
+          headerPattern: '^(\w*)(?:\(([\w-]*)\))?!?: (.*)$'
           headerPatternCorrespondence: type, scope, subject
