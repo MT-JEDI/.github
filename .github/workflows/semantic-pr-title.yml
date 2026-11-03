@@ -2,6 +2,12 @@ name: Semantic PR Title
 
 on:
   workflow_call:
+    inputs:
+      require_ticket:
+        description: 'Require one ADO ticket or NO-TICKET as the scope, e.g. feat(ADO-123): Add X'
+        default: false
+        required: false
+        type: boolean
 
 jobs:
   pr-title:
@@ -10,6 +16,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Validate PR title against conventional commits
+        if: ${{ !inputs.require_ticket }}
         uses: amannn/action-semantic-pull-request@v5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -26,3 +33,28 @@ jobs:
             build
             revert
           requireScope: false
+
+      - name: Validate PR title against conventional commits with ticket scope
+        if: ${{ inputs.require_ticket }}
+        uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            chore
+            docs
+            test
+            refactor
+            ci
+            perf
+            build
+            revert
+          requireScope: true
+          scopes: |
+            ADO-\d+
+            NO-TICKET
+          # No comma in the scope, so a title carries one ticket only; optional ! marks a breaking change
+          headerPattern: '^(\w*)(?:\(([\w-]*)\))?!?: (.*)$'
+          headerPatternCorrespondence: type, scope, subject
