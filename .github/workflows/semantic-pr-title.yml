@@ -25,4 +25,11 @@ jobs:
             perf
             build
             revert
-          requireScope: false
+          # Scope is one ADO ticket or NO-TICKET, e.g. feat(ADO-123): Add X
+          requireScope: true
+          scopes: |
+            ADO-\d+
+            NO-TICKET
+          # No comma in the scope, so a title carries one ticket only
+          headerPattern: '^(\w*)(?:\(([\w-]*)\))?: (.*)$'
+          headerPatternCorrespondence: type, scope, subject
