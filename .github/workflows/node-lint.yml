@@ -117,11 +117,11 @@ jobs:
               nvmrcs="${nvmrcs}${nv}"$'\n'
             fi
             if [ -f "$root/package.json" ]; then
-              ev=$(cd "$root" && node -e "
+              ev=$({ cd "$root" && node -e "
                 const p=require('./package.json');
                 const e=p.engines&&p.engines.node;
                 if(e) process.stdout.write(String(e).trim());
-              " 2>/dev/null || true)
+              " 2>/dev/null; } || true)
               if [ -n "$ev" ]; then
                 engines="${engines}${ev}"$'\n'
               fi
