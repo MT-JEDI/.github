@@ -1,0 +1,356 @@
+name: Node Unit Tests
+# Coverage ratchet: combines per-package Jest coverage-summary.json into a repo-wide
+# line total and compares against coverage-baseline.txt at the repo root (absent file =
+# advisory notice only). If a repo uses the test-script input, the script may opt into
+# the ratchet by leaving coverage/coverage-summary.json under each package directory.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version (default: .nvmrc, engines.node, or 24)'
+        default: ''
+        required: false
+        type: string
+      test-script:
+        description: 'Optional repo-local script that replaces per-package npm test'
+        default: ''
+        required: false
+        type: string
+      aws-role:
+        description: >-
+          Optional IAM role to assume before npm ci, for repos whose install hooks or
+          registry resolve against private CodeArtifact. Leave empty to skip AWS
+          entirely (default for public-registry repos). Callers must grant
+          `id-token: write` when this is set.
+        default: ''
+        required: false
+        type: string
+      aws-region:
+        description: 'Region for the assumed role and the CodeArtifact login'
+        default: 'us-east-1'
+        required: false
+        type: string
+      codeartifact-domain:
+        description: 'CodeArtifact domain to log npm into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-domain-owner:
+        description: 'Account id owning the CodeArtifact domain (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-repository:
+        description: 'CodeArtifact repository to log npm into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    # No `permissions:` block on purpose, so the job inherits whatever the CALLER
+    # granted. A reusable workflow can only narrow the caller's grant, never widen
+    # it, so declaring scopes here would fail callers that do not also grant them.
+    # Callers must grant, at minimum:
+    #     contents: read        (checkout)
+    #     checks: write         )  publish-unit-test-result-action creates a check run
+    #     pull-requests: write  )  and, with comment_mode: always, a PR comment
+    # plus `id-token: write` if and only if they pass the aws-role input (CodeArtifact).
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Discover packages and tests
+        id: discover
+        env:
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: |
+          set -euo pipefail
+          install_roots=""
+          test_roots=""
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            dir=$(dirname "$pkg")
+            if [ ! -f "$dir/package-lock.json" ]; then
+              echo "::error::package.json without sibling package-lock.json: ${pkg#./}. Commit a lockfile or remove the manifest."
+              exit 1
+            fi
+            install_roots="${install_roots}${dir}"$'\n'
+            hit=$(find "$dir" \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
+              -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+              -o -type f \( \
+                -name '*.test.js' -o -name '*.test.jsx' -o -name '*.test.ts' -o -name '*.test.tsx' \
+                -o -name '*.test.mjs' -o -name '*.test.cjs' \
+                -o -name '*.spec.js' -o -name '*.spec.jsx' -o -name '*.spec.ts' -o -name '*.spec.tsx' \
+                -o -name '*.spec.mjs' -o -name '*.spec.cjs' \) -print -quit)
+            if [ -z "$hit" ]; then
+              hit=$(find "$dir" \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
+                -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+                -o -type f -path '*/__tests__/*' \( \
+                  -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \
+                  -o -name '*.mjs' -o -name '*.cjs' \) -print -quit)
+            fi
+            if [ -n "$hit" ]; then
+              test_roots="${test_roots}${dir}"$'\n'
+            fi
+          done < <(find . \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
+            -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+            -o -name package.json -print | sort)
+          {
+            echo "install_roots<<INSTALL_EOF"
+            printf '%s' "$install_roots"
+            echo "INSTALL_EOF"
+            echo "test_roots<<TEST_EOF"
+            printf '%s' "$test_roots"
+            echo "TEST_EOF"
+          } >> "$GITHUB_OUTPUT"
+          if [ -n "$TEST_SCRIPT" ] || [ -n "$test_roots" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: No tests found (vacuous pass)
+        if: steps.discover.outputs.found == 'false'
+        run: echo "::notice::No unit tests found in this repository. The unit-test gate passes vacuously. Add tests (*.test.*, *.spec.*, or __tests__/) to activate it."
+
+      - name: Resolve Node.js version
+        if: steps.discover.outputs.found == 'true'
+        id: node
+        env:
+          INPUT_VERSION: ${{ inputs.node-version }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f .nvmrc ]; then
+            v=$(head -n1 .nvmrc | tr -d '[:space:]v')
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f package.json ]; then
+            v=$(node -e "
+              const p=require('./package.json');
+              const e=p.engines&&p.engines.node;
+              if(e) process.stdout.write(String(e).trim());
+            " 2>/dev/null || true)
+            if [ -n "$v" ]; then
+              echo "version=$v" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          engines=""
+          nvmrcs=""
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            if [ -f "$root/.nvmrc" ]; then
+              nv=$(head -n1 "$root/.nvmrc" | tr -d '[:space:]v')
+              nvmrcs="${nvmrcs}${nv}"$'\n'
+            fi
+            if [ -f "$root/package.json" ]; then
+              ev=$(cd "$root" && node -e "
+                const p=require('./package.json');
+                const e=p.engines&&p.engines.node;
+                if(e) process.stdout.write(String(e).trim());
+              " 2>/dev/null || true)
+              if [ -n "$ev" ]; then
+                engines="${engines}${ev}"$'\n'
+              fi
+            fi
+          done <<< "${{ steps.discover.outputs.install_roots }}"
+          pick_unique() {
+            printf '%s' "$1" | sed '/^$/d' | sort -u
+          }
+          uniq_nvm=$(pick_unique "$nvmrcs")
+          uniq_eng=$(pick_unique "$engines")
+          if [ "$(echo "$uniq_nvm" | wc -l | tr -d ' ')" -eq 1 ] && [ -n "$uniq_nvm" ]; then
+            echo "version=$(echo "$uniq_nvm" | head -n1)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(echo "$uniq_eng" | wc -l | tr -d ' ')" -eq 1 ] && [ -n "$uniq_eng" ]; then
+            echo "version=$(echo "$uniq_eng" | head -n1)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$uniq_nvm$uniq_eng" ]; then
+            echo "::warning::Install roots disagree on Node version; defaulting to 24."
+          fi
+          echo "version=24" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.discover.outputs.found == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+
+      - name: Configure AWS credentials for CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Log npm into CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        env:
+          DOMAIN: ${{ inputs.codeartifact-domain }}
+          DOMAIN_OWNER: ${{ inputs.codeartifact-domain-owner }}
+          REPOSITORY: ${{ inputs.codeartifact-repository }}
+        run: |
+          set -euo pipefail
+          for name in DOMAIN DOMAIN_OWNER REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              input_name=$(echo "$name" | tr 'A-Z_' 'a-z-')
+              echo "::error::aws-role was supplied without codeartifact-${input_name}; pass all four inputs or none."
+              exit 1
+            fi
+          done
+          aws codeartifact login --tool npm \
+            --domain "$DOMAIN" \
+            --domain-owner "$DOMAIN_OWNER" \
+            --repository "$REPOSITORY"
+
+      - name: Install dependencies
+        if: steps.discover.outputs.found == 'true'
+        env:
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TEST_SCRIPT" ]; then
+            roots="${{ steps.discover.outputs.install_roots }}"
+          else
+            roots="${{ steps.discover.outputs.test_roots }}"
+          fi
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            echo "::group::npm ci ${root#./}"
+            (cd "$root" && npm ci)
+            echo "::endgroup::"
+          done <<< "$roots"
+
+      - name: Revoke AWS credentials
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        run: |
+          for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION; do
+            echo "${var}=" >> "$GITHUB_ENV"
+          done
+          echo "Assumed-role credentials cleared for subsequent steps."
+
+      - name: Run unit tests
+        if: steps.discover.outputs.found == 'true'
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: fake
+          AWS_SECRET_ACCESS_KEY: fake
+          TEST_SCRIPT: ${{ inputs.test-script }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TEST_SCRIPT" ]; then
+            bash "$TEST_SCRIPT"
+            exit $?
+          fi
+          failed=0
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            echo "::group::npm test ${root#./}"
+            rc=0
+            (cd "$root" && npm test) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done <<< "${{ steps.discover.outputs.test_roots }}"
+          exit $failed
+
+      - name: Coverage ratchet
+        if: steps.discover.outputs.found == 'true'
+        run: |
+          set -euo pipefail
+          set +e
+          node <<'NODE'
+          const fs = require('fs');
+          const { execSync } = require('child_process');
+          let out;
+          try {
+            out = execSync(
+              "find . \\( -path '*/node_modules/*' -o -path '*/.git/*' \\) -prune " +
+              "-o -path '*/coverage/coverage-summary.json' -print",
+              { encoding: 'utf8' }
+            );
+          } catch {
+            process.exit(3);
+          }
+          const files = out.trim().split('\n').filter(Boolean);
+          if (files.length === 0) process.exit(3);
+          let covered = 0;
+          let totalLines = 0;
+          for (const f of files) {
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            const lines = j.total && j.total.lines;
+            if (!lines || typeof lines.total !== 'number') continue;
+            covered += lines.covered || 0;
+            totalLines += lines.total;
+          }
+          if (totalLines === 0) process.exit(3);
+          const pct = Math.round((covered / totalLines) * 1000) / 10;
+          fs.writeFileSync('coverage-total.txt', String(pct));
+          NODE
+          rc=$?
+          set -e
+          if [ "$rc" -eq 3 ]; then
+            echo "::notice::No coverage data produced; coverage ratchet skipped."
+            exit 0
+          fi
+          if [ "$rc" -ne 0 ]; then
+            echo "::notice::No coverage data produced; coverage ratchet skipped."
+            exit 0
+          fi
+          total=$(cat coverage-total.txt)
+          echo "Repo-wide unit-test coverage: ${total}%"
+          if [ ! -f coverage-baseline.txt ]; then
+            echo "::notice::No coverage baseline; repo-wide coverage is ${total}%. Commit coverage-baseline.txt (a single number) at the repo root to enable the ratchet."
+            exit 0
+          fi
+          baseline=$(head -n1 coverage-baseline.txt | tr -d '[:space:]')
+          if ! [[ "$baseline" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            echo "::error::coverage-baseline.txt must contain a single number (found: '${baseline}'). Fix or remove the file."
+            exit 1
+          fi
+          node -e "
+          const total = parseFloat('${total}');
+          const baseline = parseFloat('${baseline}');
+          if (total < baseline) {
+            console.error('::error::Coverage ' + total + '% is below the baseline ' + baseline + '% (coverage-baseline.txt). Add tests, or lower the baseline in this PR with justification.');
+            process.exit(1);
+          }
+          if (total >= baseline + 1.0) {
+            console.log('::notice::Coverage rose to ' + total + '% (baseline ' + baseline + '%). Bump coverage-baseline.txt.');
+          }
+          "
+
+      - name: Detect JUnit reports
+        if: always() && steps.discover.outputs.found == 'true'
+        id: junit
+        run: |
+          shopt -s nullglob
+          files=(./junit.xml ./test-results/*.xml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "has_junit=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_junit=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish test results
+        if: always() && steps.discover.outputs.found == 'true' && steps.junit.outputs.has_junit == 'true'
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: |
+            junit.xml
+            test-results/*.xml
+          check_name: 'Node Unit Test Results'
+          comment_mode: always
+          fail_on: test failures
