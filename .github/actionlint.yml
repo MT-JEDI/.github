@@ -1,0 +1,7 @@
+# actionlint config. Keep ignores narrow and explain each one.
+paths:
+  .github/workflows/review-thread-draft-gate.yml:
+    ignore:
+      # GraphQL ($owner, $id) and jq ($bot) variables sit inside single quotes on
+      # purpose: they must reach gh/jq literally, not be expanded by the shell.
+      - 'shellcheck reported issue in this script: SC2016:.+'

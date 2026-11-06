@@ -62,6 +62,10 @@ PR titles must follow conventional commits (same types as `semantic-pr-title.yml
 
 **Squash-merge is required.** [release.yml](.github/workflows/release.yml) reads the merge commit subject on `main`. A regular merge commit (`Merge pull request #N ...`) or a rebase merge does not match conventional commits and skips the release. This repo must allow **squash merge only**, with the squash commit title set to the **PR title** (not the underlying commit message).
 
+## Linting Workflows
+
+Changes under `.github/workflows/` are checked by [actionlint](https://github.com/rhysd/actionlint) (with shellcheck for `run:` blocks) via `actionlint.yml`. Run `actionlint` locally before pushing; config and narrow ignores live in `.github/actionlint.yml`.
+
 ## Shared Workflows
 
 ### Deploy Build Pipeline
