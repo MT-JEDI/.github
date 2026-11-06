@@ -22,15 +22,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Pinned release; the download script verifies nothing beyond the tag, so bump
-      # deliberately. shellcheck is preinstalled on ubuntu-latest and is picked up
-      # automatically to lint `run:` blocks.
+      # Download the release tarball directly and verify it against a SHA-256 pinned in
+      # this file (from the v1.7.12 release's checksums file), so a moved tag or
+      # tampered release fails the job instead of running. When bumping the version,
+      # update both values from the new release's actionlint_<ver>_checksums.txt.
+      # shellcheck is preinstalled on ubuntu-latest and is picked up automatically to
+      # lint `run:` blocks.
       - name: Install actionlint
         env:
           ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
         run: |
           set -euo pipefail
-          bash <(curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash") "${ACTIONLINT_VERSION}"
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Run actionlint
-        run: ./actionlint -color
+        run: actionlint -color
