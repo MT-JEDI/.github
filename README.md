@@ -170,6 +170,136 @@ jobs:
       files_to_ignore: 'package-lock.json,yarn.lock,pnpm-lock.yaml,*.min.js'
 ```
 
+---
+
+## Node Lint
+
+Runs `npm ci` in each npm package directory (both `package.json` and `package-lock.json` required), then ESLint and Prettier check (`npm run lint`, `npm run format:check`) — same runner so `node_modules` from install is available for lint. Nested packages such as `functions/<name>/` are discovered automatically. A manifest without a sibling lockfile fails the job. If no install roots exist, the job fails (the lint gate does not pass vacuously).
+
+Optional **CodeArtifact**: pass `aws-role` plus `codeartifact-domain`, `codeartifact-domain-owner`, and `codeartifact-repository` (same contract as `python-unit-tests.yml`, but `aws codeartifact login --tool npm`). The reusable job assumes the role, logs npm into CodeArtifact, runs `npm ci`, then clears assumed-role env vars before lint so lint does not run with live AWS credentials. Leave `aws-role` empty for public-registry-only repos.
+
+**Branch protection:** the caller job id must be `lint` and this workflow's job id is `lint`, so the required status context is `lint / lint`.
+
+**Node version:** optional `node-version` input; otherwise root `.nvmrc`, root `package.json` `engines.node`, a single agreed value across packages, or `24`.
+
+**Permissions:** callers grant `contents: read`. If you pass `aws-role`, also grant `id-token: write` (OIDC). Do not hardcode IAM ARNs in this public repo — use a caller repo org variable or secret.
+
+### Basic usage
+
+```yml
+name: Node Lint
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: MT-JEDI/.github/.github/workflows/node-lint.yml@v1
+```
+
+### Pin Node version
+
+```yml
+jobs:
+  lint:
+    uses: MT-JEDI/.github/.github/workflows/node-lint.yml@v1
+    with:
+      node-version: '24'
+```
+
+### CodeArtifact (optional)
+
+```yml
+name: Node Lint
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  lint:
+    uses: MT-JEDI/.github/.github/workflows/node-lint.yml@v1
+    with:
+      aws-role: ${{ vars.GITHUB_ACTION_OIDC_ROLE_ARN }}
+      aws-region: us-east-1
+      codeartifact-domain: mtjedi
+      codeartifact-domain-owner: '<account-id>'
+      codeartifact-repository: eda-packages
+```
+
+---
+
+## Node Unit Tests
+
+Runs `npm ci` and `npm test` per package that owns tests (`*.test.*`, `*.spec.*`, or files under `__tests__/`; files in nested packages belong to the nested package). Repos with no matching tests pass with a notice (Jest is not invoked). Optional `test-script` replaces the per-package test loop but still runs `npm ci` in discovered packages first.
+
+Optional **CodeArtifact:** same inputs as Node Lint (`aws-role`, `aws-region`, `codeartifact-domain`, `codeartifact-domain-owner`, `codeartifact-repository`). Install uses `aws codeartifact login --tool npm` and `npm ci`; assumed-role credentials are cleared before `npm test` so the test step keeps fake `AWS_*` isolation for live-call guards.
+
+Combines Jest `coverage/coverage-summary.json` line counts (**requires `json-summary` in the Jest `coverageReporters`**, e.g. `["text", "json-summary"]`; without it no summary is written and the ratchet is skipped with a notice; an unreadable or invalid summary fails the job) across packages and compares the repo-wide percentage to `coverage-baseline.txt` at the repo root (missing baseline = advisory notice only). Publishes JUnit to the PR when `junit.xml` or `test-results/*.xml` exists at any depth outside `node_modules` (configure `jest-junit` in the repo's Jest config if you want PR test summaries).
+
+**Branch protection:** caller job id `unit-tests`; required context `unit-tests / unit-tests`.
+
+**Permissions:** callers must grant `contents: read`, `checks: write`, and `pull-requests: write` (same as the Python unit-test workflow). Grant `id-token: write` **if and only if** you pass `aws-role`.
+
+### Basic usage
+
+```yml
+name: Node Unit Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  unit-tests:
+    uses: MT-JEDI/.github/.github/workflows/node-unit-tests.yml@v1
+```
+
+### Custom test runner script
+
+```yml
+jobs:
+  unit-tests:
+    uses: MT-JEDI/.github/.github/workflows/node-unit-tests.yml@v1
+    with:
+      test-script: scripts/run-unit-tests.sh
+```
+
+### CodeArtifact (optional)
+
+```yml
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  unit-tests:
+    uses: MT-JEDI/.github/.github/workflows/node-unit-tests.yml@v1
+    with:
+      aws-role: ${{ vars.GITHUB_ACTION_OIDC_ROLE_ARN }}
+      aws-region: us-east-1
+      codeartifact-domain: mtjedi
+      codeartifact-domain-owner: '<account-id>'
+      codeartifact-repository: eda-packages
+```
+
+---
+
 ## Team Conventions (DIoTS)
 
 ### PR titles: conventional commits (enforced by CI)
@@ -205,3 +335,7 @@ All iot-* repos lint with Ruff (rules `E`, `F`, `I`; `ruff format` for style). C
 pip install ruff==0.15.6
 ruff check . && ruff format --check .
 ```
+
+### Node linting and unit tests (Telemetry)
+
+Telemetry Node.js repos use ESLint + Prettier via `npm run lint` and `npm run format:check`, and Jest via `npm test` (typically `jest --ci --coverage`). Config lives in each package directory (`eslint.config.js`, `.prettierrc`, `jest.config.js`). CI ratchets combined line coverage against `coverage-baseline.txt` at the repo root. Run locally with the same scripts as the shared `node-lint.yml` and `node-unit-tests.yml` workflows.

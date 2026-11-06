@@ -1,0 +1,224 @@
+name: Node Lint
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version (default: .nvmrc, engines.node, or 24)'
+        default: ''
+        required: false
+        type: string
+      aws-role:
+        description: >-
+          Optional IAM role to assume before npm ci, for repos whose install hooks or
+          registry resolve against private CodeArtifact. Leave empty to skip AWS
+          entirely (default for public-registry repos). Callers must grant
+          `id-token: write` when this is set.
+        default: ''
+        required: false
+        type: string
+      aws-region:
+        description: 'Region for the assumed role and the CodeArtifact login'
+        default: 'us-east-1'
+        required: false
+        type: string
+      codeartifact-domain:
+        description: 'CodeArtifact domain to log npm into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-domain-owner:
+        description: 'Account id owning the CodeArtifact domain (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+      codeartifact-repository:
+        description: 'CodeArtifact repository to log npm into (requires aws-role)'
+        default: ''
+        required: false
+        type: string
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    # No `permissions:` block on purpose: the job inherits the caller's grant. A
+    # reusable workflow can only narrow the caller's grant, never widen it. Callers
+    # must grant `contents: read` plus `id-token: write` if they pass `aws-role`.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Discover install roots
+        id: discover
+        run: |
+          set -euo pipefail
+          roots=""
+          while IFS= read -r pkg; do
+            [ -z "$pkg" ] && continue
+            dir=$(dirname "$pkg")
+            if [ ! -f "$dir/package-lock.json" ]; then
+              echo "::error::package.json without sibling package-lock.json: ${pkg#./}. Commit a lockfile or remove the manifest."
+              exit 1
+            fi
+            roots="${roots}${dir}"$'\n'
+          done < <(find . \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
+            -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+            -o -name package.json -print | sort)
+          if [ -z "$roots" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "roots<<ROOTS_EOF"
+            printf '%s' "$roots"
+            echo "ROOTS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: No packages found
+        if: steps.discover.outputs.found == 'false'
+        run: |
+          echo "::error::No npm install roots found (package.json + package-lock.json). The lint gate cannot pass vacuously."
+          exit 1
+
+      - name: Resolve Node.js version
+        id: node
+        env:
+          INPUT_VERSION: ${{ inputs.node-version }}
+          ROOTS: ${{ steps.discover.outputs.roots }}
+        run: |
+          set -euo pipefail
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f .nvmrc ]; then
+            v=$(head -n1 .nvmrc | tr -d '[:space:]v')
+            echo "version=$v" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -f package.json ]; then
+            v=$(node -e "
+              const p=require('./package.json');
+              const e=p.engines&&p.engines.node;
+              if(e) process.stdout.write(String(e).trim());
+            " 2>/dev/null || true)
+            if [ -n "$v" ]; then
+              echo "version=$v" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          engines=""
+          nvmrcs=""
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            if [ -f "$root/.nvmrc" ]; then
+              nv=$(head -n1 "$root/.nvmrc" | tr -d '[:space:]v')
+              nvmrcs="${nvmrcs}${nv}"$'\n'
+            fi
+            if [ -f "$root/package.json" ]; then
+              ev=$({ cd "$root" && node -e "
+                const p=require('./package.json');
+                const e=p.engines&&p.engines.node;
+                if(e) process.stdout.write(String(e).trim());
+              " 2>/dev/null; } || true)
+              if [ -n "$ev" ]; then
+                engines="${engines}${ev}"$'\n'
+              fi
+            fi
+          done <<< "$ROOTS"
+          pick_unique() {
+            printf '%s' "$1" | sed '/^$/d' | sort -u
+          }
+          uniq_nvm=$(pick_unique "$nvmrcs")
+          uniq_eng=$(pick_unique "$engines")
+          if [ "$(echo "$uniq_nvm" | wc -l | tr -d ' ')" -eq 1 ] && [ -n "$uniq_nvm" ]; then
+            echo "version=$(echo "$uniq_nvm" | head -n1)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$(echo "$uniq_eng" | wc -l | tr -d ' ')" -eq 1 ] && [ -n "$uniq_eng" ]; then
+            echo "version=$(echo "$uniq_eng" | head -n1)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -n "$uniq_nvm$uniq_eng" ]; then
+            echo "::warning::Install roots disagree on Node version; defaulting to 24."
+          fi
+          echo "version=24" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+
+      - name: Configure AWS credentials for CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ inputs.aws-role }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - name: Log npm into CodeArtifact
+        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        env:
+          DOMAIN: ${{ inputs.codeartifact-domain }}
+          DOMAIN_OWNER: ${{ inputs.codeartifact-domain-owner }}
+          REPOSITORY: ${{ inputs.codeartifact-repository }}
+        run: |
+          set -euo pipefail
+          for name in DOMAIN DOMAIN_OWNER REPOSITORY; do
+            if [ -z "${!name}" ]; then
+              input_name=$(echo "$name" | tr 'A-Z_' 'a-z-')
+              echo "::error::aws-role was supplied without codeartifact-${input_name}; pass all four inputs or none."
+              exit 1
+            fi
+          done
+          aws codeartifact login --tool npm \
+            --domain "$DOMAIN" \
+            --domain-owner "$DOMAIN_OWNER" \
+            --repository "$REPOSITORY"
+
+      - name: Install dependencies
+        if: steps.discover.outputs.found == 'true'
+        env:
+          ROOTS: ${{ steps.discover.outputs.roots }}
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            echo "::group::npm ci ${root#./}"
+            rc=0
+            (cd "$root" && npm ci) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done <<< "$ROOTS"
+          exit $failed
+
+      - name: Revoke AWS credentials
+        if: always() && steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        run: |
+          for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION; do
+            echo "${var}=" >> "$GITHUB_ENV"
+          done
+          echo "Assumed-role credentials cleared for subsequent steps."
+
+      - name: Lint and format check
+        if: steps.discover.outputs.found == 'true'
+        env:
+          ROOTS: ${{ steps.discover.outputs.roots }}
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r root; do
+            [ -z "$root" ] && continue
+            echo "::group::Lint ${root#./}"
+            rc=0
+            (cd "$root" && npm run lint && npm run format:check) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              failed=1
+            fi
+            echo "::endgroup::"
+          done <<< "$ROOTS"
+          exit $failed
