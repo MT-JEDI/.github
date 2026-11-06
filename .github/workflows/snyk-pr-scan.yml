@@ -33,7 +33,7 @@ on:
         required: false
         type: string
       codeartifact-region:
-        description: 'Region for the CodeArtifact login (defaults to the domain region)'
+        description: "Region of the CodeArtifact domain, used for the role and the login (default us-east-1; set it if the domain is elsewhere)"
         default: 'us-east-1'
         required: false
         type: string
