@@ -85,6 +85,7 @@ jobs:
         id: node
         env:
           INPUT_VERSION: ${{ inputs.node-version }}
+          ROOTS: ${{ steps.discover.outputs.roots }}
         run: |
           set -euo pipefail
           if [ -n "$INPUT_VERSION" ]; then
@@ -125,7 +126,7 @@ jobs:
                 engines="${engines}${ev}"$'\n'
               fi
             fi
-          done <<< "${{ steps.discover.outputs.roots }}"
+          done <<< "$ROOTS"
           pick_unique() {
             printf '%s' "$1" | sed '/^$/d' | sort -u
           }
@@ -178,6 +179,8 @@ jobs:
 
       - name: Install dependencies
         if: steps.discover.outputs.found == 'true'
+        env:
+          ROOTS: ${{ steps.discover.outputs.roots }}
         run: |
           set -euo pipefail
           failed=0
@@ -190,11 +193,11 @@ jobs:
               failed=1
             fi
             echo "::endgroup::"
-          done <<< "${{ steps.discover.outputs.roots }}"
+          done <<< "$ROOTS"
           exit $failed
 
       - name: Revoke AWS credentials
-        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        if: always() && steps.discover.outputs.found == 'true' && inputs.aws-role != ''
         run: |
           for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION; do
             echo "${var}=" >> "$GITHUB_ENV"
@@ -203,6 +206,8 @@ jobs:
 
       - name: Lint and format check
         if: steps.discover.outputs.found == 'true'
+        env:
+          ROOTS: ${{ steps.discover.outputs.roots }}
         run: |
           set -euo pipefail
           failed=0
@@ -215,5 +220,5 @@ jobs:
               failed=1
             fi
             echo "::endgroup::"
-          done <<< "${{ steps.discover.outputs.roots }}"
+          done <<< "$ROOTS"
           exit $failed

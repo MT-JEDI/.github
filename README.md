@@ -235,11 +235,11 @@ jobs:
 
 ## Node Unit Tests
 
-Runs `npm ci` and `npm test` per package that contains tests (`*.test.*`, `*.spec.*`, or files under `__tests__/`). Repos with no matching tests pass with a notice (Jest is not invoked). Optional `test-script` replaces the per-package test loop but still runs `npm ci` in discovered packages first.
+Runs `npm ci` and `npm test` per package that owns tests (`*.test.*`, `*.spec.*`, or files under `__tests__/`; files in nested packages belong to the nested package). Repos with no matching tests pass with a notice (Jest is not invoked). Optional `test-script` replaces the per-package test loop but still runs `npm ci` in discovered packages first.
 
 Optional **CodeArtifact:** same inputs as Node Lint (`aws-role`, `aws-region`, `codeartifact-domain`, `codeartifact-domain-owner`, `codeartifact-repository`). Install uses `aws codeartifact login --tool npm` and `npm ci`; assumed-role credentials are cleared before `npm test` so the test step keeps fake `AWS_*` isolation for live-call guards.
 
-Combines Jest `coverage/coverage-summary.json` line counts across packages and compares the repo-wide percentage to `coverage-baseline.txt` at the repo root (missing baseline = advisory notice only). Publishes JUnit to the PR when `junit.xml` or `test-results/*.xml` exists (configure `jest-junit` in the repo's Jest config if you want PR test summaries).
+Combines Jest `coverage/coverage-summary.json` line counts (**requires `json-summary` in the Jest `coverageReporters`**, e.g. `["text", "json-summary"]`; without it no summary is written and the ratchet is skipped with a notice; an unreadable or invalid summary fails the job) across packages and compares the repo-wide percentage to `coverage-baseline.txt` at the repo root (missing baseline = advisory notice only). Publishes JUnit to the PR when `junit.xml` or `test-results/*.xml` exists at any depth outside `node_modules` (configure `jest-junit` in the repo's Jest config if you want PR test summaries).
 
 **Branch protection:** caller job id `unit-tests`; required context `unit-tests / unit-tests`.
 

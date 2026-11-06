@@ -70,16 +70,19 @@ jobs:
           set -euo pipefail
           install_roots=""
           test_roots=""
-          while IFS= read -r pkg; do
-            [ -z "$pkg" ] && continue
-            dir=$(dirname "$pkg")
-            if [ ! -f "$dir/package-lock.json" ]; then
-              echo "::error::package.json without sibling package-lock.json: ${pkg#./}. Commit a lockfile or remove the manifest."
-              exit 1
-            fi
-            install_roots="${install_roots}${dir}"$'\n'
+          prune=( \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*'
+            -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune )
+          mapfile -t pkg_dirs < <(find . "${prune[@]}" -o -name package.json -print | sort | xargs -r -d '\n' -n1 dirname)
+          for dir in "${pkg_dirs[@]}"; do
+            # Each package owns only its own files: skip nested package directories.
+            nested=()
+            for other in "${pkg_dirs[@]}"; do
+              if [ "$other" != "$dir" ] && { [ "$dir" = "." ] || [[ "$other" == "$dir"/* ]]; }; then
+                nested+=( -o -path "$other" )
+              fi
+            done
             hit=$(find "$dir" \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
-              -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+              -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' "${nested[@]}" \) -prune \
               -o -type f \( \
                 -name '*.test.js' -o -name '*.test.jsx' -o -name '*.test.ts' -o -name '*.test.tsx' \
                 -o -name '*.test.mjs' -o -name '*.test.cjs' \
@@ -87,17 +90,25 @@ jobs:
                 -o -name '*.spec.mjs' -o -name '*.spec.cjs' \) -print -quit)
             if [ -z "$hit" ]; then
               hit=$(find "$dir" \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
-                -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
+                -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' "${nested[@]}" \) -prune \
                 -o -type f -path '*/__tests__/*' \( \
                   -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \
                   -o -name '*.mjs' -o -name '*.cjs' \) -print -quit)
             fi
+            # Lockfiles are only required where npm ci will run: every package when a
+            # test-script is used, otherwise only packages that own tests. This keeps the
+            # no-tests vacuous pass reachable for repos with unrelated manifests.
+            if [ -n "$TEST_SCRIPT" ] || [ -n "$hit" ]; then
+              if [ ! -f "$dir/package-lock.json" ]; then
+                echo "::error::package.json without sibling package-lock.json: ${dir#./}/package.json. Commit a lockfile or remove the manifest."
+                exit 1
+              fi
+            fi
+            install_roots="${install_roots}${dir}"$'\n'
             if [ -n "$hit" ]; then
               test_roots="${test_roots}${dir}"$'\n'
             fi
-          done < <(find . \( -path '*/node_modules/*' -o -path '*/.git/*' -o -path '*/dist/*' \
-            -o -path '*/coverage/*' -o -path '*/cdk.out/*' -o -path '*/.terraform/*' \) -prune \
-            -o -name package.json -print | sort)
+          done
           {
             echo "install_roots<<INSTALL_EOF"
             printf '%s' "$install_roots"
@@ -121,6 +132,7 @@ jobs:
         id: node
         env:
           INPUT_VERSION: ${{ inputs.node-version }}
+          ROOTS: ${{ steps.discover.outputs.install_roots }}
         run: |
           set -euo pipefail
           if [ -n "$INPUT_VERSION" ]; then
@@ -161,7 +173,7 @@ jobs:
                 engines="${engines}${ev}"$'\n'
               fi
             fi
-          done <<< "${{ steps.discover.outputs.install_roots }}"
+          done <<< "$ROOTS"
           pick_unique() {
             printf '%s' "$1" | sed '/^$/d' | sort -u
           }
@@ -217,12 +229,14 @@ jobs:
         if: steps.discover.outputs.found == 'true'
         env:
           TEST_SCRIPT: ${{ inputs.test-script }}
+          INSTALL_ROOTS: ${{ steps.discover.outputs.install_roots }}
+          TEST_ROOTS: ${{ steps.discover.outputs.test_roots }}
         run: |
           set -euo pipefail
           if [ -n "$TEST_SCRIPT" ]; then
-            roots="${{ steps.discover.outputs.install_roots }}"
+            roots="$INSTALL_ROOTS"
           else
-            roots="${{ steps.discover.outputs.test_roots }}"
+            roots="$TEST_ROOTS"
           fi
           while IFS= read -r root; do
             [ -z "$root" ] && continue
@@ -232,7 +246,7 @@ jobs:
           done <<< "$roots"
 
       - name: Revoke AWS credentials
-        if: steps.discover.outputs.found == 'true' && inputs.aws-role != ''
+        if: always() && steps.discover.outputs.found == 'true' && inputs.aws-role != ''
         run: |
           for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_CREDENTIAL_EXPIRATION; do
             echo "${var}=" >> "$GITHUB_ENV"
@@ -247,6 +261,7 @@ jobs:
           AWS_ACCESS_KEY_ID: fake
           AWS_SECRET_ACCESS_KEY: fake
           TEST_SCRIPT: ${{ inputs.test-script }}
+          TEST_ROOTS: ${{ steps.discover.outputs.test_roots }}
         run: |
           set -euo pipefail
           if [ -n "$TEST_SCRIPT" ]; then
@@ -263,7 +278,7 @@ jobs:
               failed=1
             fi
             echo "::endgroup::"
-          done <<< "${{ steps.discover.outputs.test_roots }}"
+          done <<< "$TEST_ROOTS"
           exit $failed
 
       - name: Coverage ratchet
@@ -282,7 +297,7 @@ jobs:
               { encoding: 'utf8' }
             );
           } catch {
-            process.exit(3);
+            process.exit(4);
           }
           const files = out.trim().split('\n').filter(Boolean);
           if (files.length === 0) process.exit(3);
@@ -306,8 +321,8 @@ jobs:
             exit 0
           fi
           if [ "$rc" -ne 0 ]; then
-            echo "::notice::No coverage data produced; coverage ratchet skipped."
-            exit 0
+            echo "::error::Coverage calculation failed (exit ${rc}); coverage-summary.json may be invalid or unreadable."
+            exit 1
           fi
           total=$(cat coverage-total.txt)
           echo "Repo-wide unit-test coverage: ${total}%"
@@ -336,8 +351,8 @@ jobs:
         if: always() && steps.discover.outputs.found == 'true'
         id: junit
         run: |
-          shopt -s nullglob
-          files=(./junit.xml ./test-results/*.xml)
+          mapfile -t files < <(find . \( -path '*/node_modules/*' -o -path '*/.git/*' \) -prune \
+            -o -type f \( -name junit.xml -o -path '*/test-results/*.xml' \) -print)
           if [ ${#files[@]} -eq 0 ]; then
             echo "has_junit=false" >> "$GITHUB_OUTPUT"
           else
@@ -349,8 +364,9 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@v2
         with:
           files: |
-            junit.xml
-            test-results/*.xml
+            **/junit.xml
+            **/test-results/*.xml
+            !**/node_modules/**
           check_name: 'Node Unit Test Results'
           comment_mode: always
           fail_on: test failures
