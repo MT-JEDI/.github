@@ -228,7 +228,7 @@ jobs:
   lint:
     uses: MT-JEDI/.github/.github/workflows/node-lint.yml@v1
     with:
-      aws-role: ${{ vars.GITHUB_ACTION_OIDC_ROLE_ARN }}
+      aws-role: ${{ vars.GH_ACTION_OIDC_ROLE_ARN }}
       aws-region: us-east-1
       codeartifact-domain: mtjedi
       codeartifact-domain-owner: '<account-id>'
@@ -291,7 +291,7 @@ jobs:
   unit-tests:
     uses: MT-JEDI/.github/.github/workflows/node-unit-tests.yml@v1
     with:
-      aws-role: ${{ vars.GITHUB_ACTION_OIDC_ROLE_ARN }}
+      aws-role: ${{ vars.GH_ACTION_OIDC_ROLE_ARN }}
       aws-region: us-east-1
       codeartifact-domain: mtjedi
       codeartifact-domain-owner: '<account-id>'
